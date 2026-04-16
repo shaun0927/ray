@@ -22,6 +22,8 @@ from ray_release.configs.global_config import init_global_config
 from ray_release.custom_byod_build_init_helper import (
     build_short_gpu_map,
     create_custom_build_yaml,
+    generate_custom_build_step_key,
+    get_prerequisite_step,
 )
 from ray_release.exception import ReleaseTestCLIError, ReleaseTestConfigError
 from ray_release.logger import logger
@@ -89,6 +91,11 @@ PIPELINE_ARTIFACT_PATH = "/tmp/pipeline_artifacts"
     type=str,
     help="The output file for the test jobs json file",
 )
+@click.option(
+    "--rayci-select-output-file",
+    type=str,
+    help="Output file for RAYCI_SELECT (comma-separated base-image publish step keys).",
+)
 def main(
     test_collection_file: Tuple[str],
     run_jailed_tests: bool = False,
@@ -99,6 +106,7 @@ def main(
     run_per_test: int = 1,
     custom_build_jobs_output_file: str = None,
     test_jobs_output_file: str = None,
+    rayci_select_output_file: str = None,
 ):
     global_config_file = os.path.join(
         os.path.dirname(__file__), "..", "configs", global_config
@@ -149,6 +157,19 @@ def main(
         tests,
         gpu_map,
     )
+
+    # rayci's auto-dep walk only goes upstream, so we must select every step
+    # we want: the base-image publish step plus (if present) the custom-BYOD
+    # build step, which has its own base-image dep rayci will walk from there.
+    rayci_select_keys = set()
+    for test in tests:
+        image = test.get_anyscale_byod_image()
+        base_image = test.get_anyscale_base_byod_image()
+        prereq = get_prerequisite_step(image, base_image, gpu_map)
+        if prereq:
+            rayci_select_keys.add(prereq)
+        if test.require_custom_byod_image():
+            rayci_select_keys.add(generate_custom_build_step_key(image))
 
     # Generate test job steps
     grouped_tests = group_tests(filtered_tests)
@@ -208,6 +229,13 @@ def main(
             "wt",
         ) as fp:
             json.dump(steps, fp)
+
+        if rayci_select_output_file:
+            with open(
+                os.path.join(_bazel_workspace_dir, rayci_select_output_file),
+                "wt",
+            ) as fp:
+                fp.write(",".join(sorted(rayci_select_keys)))
 
         settings["frequency"] = settings["frequency"].value
         settings["priority"] = settings["priority"].value

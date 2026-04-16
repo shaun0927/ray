@@ -34,7 +34,6 @@
 #include "mock/ray/rpc/worker/core_worker_client.h"
 #include "ray/common/buffer.h"
 #include "ray/common/bundle_spec.h"
-#include "ray/common/cgroup2/noop_cgroup_manager.h"
 #include "ray/common/flatbuf_utils.h"
 #include "ray/common/scheduling/cluster_resource_data.h"
 #include "ray/common/scheduling/resource_set.h"
@@ -438,7 +437,7 @@ class NodeManagerTest : public ::testing::Test {
         /*shutdown_raylet_gracefully=*/
         [](const auto &) {},
         [](const std::string &) {},
-        std::make_unique<NoopCgroupManager>(),
+        nullptr,
         shutting_down_,
         *placement_group_resource_manager_,
         boost::asio::basic_socket_acceptor<local_stream_protocol>(io_service_),
