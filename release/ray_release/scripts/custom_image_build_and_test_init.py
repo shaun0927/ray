@@ -21,9 +21,8 @@ from ray_release.config import (
 from ray_release.configs.global_config import init_global_config
 from ray_release.custom_byod_build_init_helper import (
     build_short_gpu_map,
+    collect_rayci_select_keys,
     create_custom_build_yaml,
-    generate_custom_build_step_key,
-    get_prerequisite_step,
 )
 from ray_release.exception import ReleaseTestCLIError, ReleaseTestConfigError
 from ray_release.logger import logger
@@ -158,18 +157,7 @@ def main(
         gpu_map,
     )
 
-    # rayci's auto-dep walk only goes upstream, so we must select every step
-    # we want: the base-image publish step plus (if present) the custom-BYOD
-    # build step, which has its own base-image dep rayci will walk from there.
-    rayci_select_keys = set()
-    for test in tests:
-        image = test.get_anyscale_byod_image()
-        base_image = test.get_anyscale_base_byod_image()
-        prereq = get_prerequisite_step(image, base_image, gpu_map)
-        if prereq:
-            rayci_select_keys.add(prereq)
-        if test.require_custom_byod_image():
-            rayci_select_keys.add(generate_custom_build_step_key(image))
+    rayci_select_keys = collect_rayci_select_keys(tests, gpu_map)
 
     # Generate test job steps
     grouped_tests = group_tests(filtered_tests)
@@ -230,7 +218,9 @@ def main(
         ) as fp:
             json.dump(steps, fp)
 
-        if rayci_select_output_file:
+        # Only emit RAYCI_SELECT when a filter narrows the test set; an unfiltered
+        # run (e.g. full nightly) wants the complete image pipeline.
+        if rayci_select_output_file and test_filters:
             with open(
                 os.path.join(_bazel_workspace_dir, rayci_select_output_file),
                 "wt",
